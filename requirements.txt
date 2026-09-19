@@ -1,0 +1,29 @@
+# --- core ---
+numpy
+scipy
+pyyaml
+
+# --- learning ---
+torch
+
+# --- graphs / geography (Layer 0) ---
+networkx
+osmnx
+geopandas
+shapely
+
+# --- classical baseline (Layer 4) ---
+ortools
+
+# --- clustering for partitioning (Layer 2) ---
+scikit-learn
+
+# --- visualization (Layer 5) ---
+matplotlib
+plotly
+folium
+
+# --- tooling ---
+pytest
+tqdm
+pandas

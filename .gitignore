@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+/cache
+
+# cached city graphs are large and rebuildable from configs/cities.yaml
+data/raw/*
+data/processed/*
+data/city_graphs/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/city_graphs/.gitkeep
+
+checkpoints/
+*.log
+.ipynb_checkpoints/
+
+# results: keep the logs (they ARE the report's source data), ignore heavy artifacts
+results/figures/*
+results/tables/*
+!results/figures/.gitkeep
+!results/tables/.gitkeep
+!results/logs/

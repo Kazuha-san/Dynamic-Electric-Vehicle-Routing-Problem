@@ -1,0 +1,98 @@
+# ==========================================================================
+# EVRP Self-Play RL — default configuration
+#
+# Single source of truth for hyperparameters. Every reported result must be
+# reproducible from (this file + a seed). Unknown keys fail loudly on load.
+# ==========================================================================
+
+experiment:
+  name: evrp_selfplay_default
+  seed: 0
+  results_dir: results
+
+# --- Layer 0: city world --------------------------------------------------
+city:
+  config_path: configs/cities.yaml
+  cache_dir: data/city_graphs
+  default_city: us_grid
+  charging_stations:
+    count: 8                  # deliberately sparse — this is what makes battery bite
+    strategy: coverage        # manual | kmeans | coverage
+
+# --- vehicle physics ------------------------------------------------------
+vehicle:
+  capacity: 100.0             # units of demand
+  battery_capacity: 15000.0   # energy units (~metres at energy_rate 1.0)
+  energy_rate: 1.0            # energy consumed per metre travelled (v1: linear)
+  recharge_policy: full       # full | partial (partial = future extension)
+
+# --- Layer 1: dispatch / epochs -------------------------------------------
+dispatch:
+  epoch_length_seconds: 600   # the "window". Fixed-interval only in v1.
+  horizon_seconds: 7200
+  commitment: finish_committed_route   # v1 policy; full_reoptimization = stretch goal
+  order_stream:
+    kind: synthetic           # synthetic | interactive
+    arrival_rate_per_hour: 30
+    spatial: uniform          # uniform | clustered
+    demand_range: [5.0, 20.0]
+
+# --- Layer 2: fleet sizing / partitioning ---------------------------------
+fleet:
+  sizing_method: analytical   # analytical | ilp (ilp = tighter bound, comparison point)
+  partition_strategy: sweep   # sweep | kmeans | balanced
+  max_vehicles: 20            # safety ceiling on the retry loop
+
+# --- Layer 3: environment -------------------------------------------------
+env:
+  completion_bonus: 0.0       # dense reward carries the signal; bonus optional
+  cost_objective: distance    # distance | energy | time
+  feasibility:
+    escape_check: depth_1     # depth_1 (implemented) | full (NP-hard, not attempted)
+
+# --- Layer 3: policy/value network ----------------------------------------
+network:
+  architecture: attention     # attention | mlp (mlp = throwaway ablation only)
+  embedding_dim: 128
+  num_encoder_layers: 3
+  num_heads: 8
+  feedforward_dim: 512
+  dropout: 0.0
+
+# --- Layer 3: MCTS --------------------------------------------------------
+mcts:
+  variant: gumbel             # gumbel | puct (puct kept as an ablation baseline)
+  num_simulations: 64         # small on purpose — Gumbel is built for this
+  num_candidate_actions: 16   # root Gumbel-Top-k width
+  c_puct: 1.25                # used by the puct ablation only
+  dirichlet_alpha: 0.3
+  dirichlet_epsilon: 0.25
+
+# --- Layer 3: training ----------------------------------------------------
+training:
+  generations: 100
+  episodes_per_generation: 128
+  batch_size: 256
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-6
+  gradient_clip: 1.0
+  value_loss_weight: 1.0
+  replay_buffer:
+    capacity_generations: 10
+  value_normalization: nearest_neighbour   # normalize cost against a cheap reference
+  train_instance_sizes: [10, 20]
+  checkpoint_every: 5
+
+# --- Layer 4: evaluation --------------------------------------------------
+evaluation:
+  methods: [nearest_neighbour, greedy_insertion, ortools, mcts_agent]
+  cities: [us_grid, uk_organic, in_dense]
+  instance_sizes: [10, 20, 50, 100]        # includes sizes NOT trained on
+  seeds: [0, 1, 2, 3, 4]
+  ortools_time_limit_seconds: 30
+
+# --- Layer 5: visualization -----------------------------------------------
+viz:
+  backend: matplotlib         # matplotlib | plotly | folium
+  animate: false
+  dpi: 150

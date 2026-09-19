@@ -1,0 +1,42 @@
+# ==========================================================================
+# City definitions — Layer 0
+#
+# Cities are INSPIRED BY real places, not 1:1 recreations. Real districts are
+# pulled purely to obtain genuine topological variety; the point of the
+# cross-city experiment is to test whether a policy trained on one street
+# topology generalizes to a structurally different one.
+#
+# `query` values below are PLACEHOLDERS — pick the actual districts in
+# Checkpoint 1 by eyeballing candidates and checking node counts, then record
+# the final choices here (and in the research log).
+# ==========================================================================
+
+defaults:
+  network_type: drive
+  simplify: true
+  target_node_count: [1500, 4000]   # big enough to be non-trivial, small enough to precompute
+
+cities:
+  - city_id: us_grid
+    display_name: "US-style grid district"
+    topology_label: grid
+    query: "PLACEHOLDER — e.g. a gridded district of a US city"
+    depot:
+      strategy: centroid          # centroid | manual
+      node: null
+
+  - city_id: uk_organic
+    display_name: "UK-style organic district"
+    topology_label: organic
+    query: "PLACEHOLDER — e.g. an irregular/older district of a UK city"
+    depot:
+      strategy: centroid
+      node: null
+
+  - city_id: in_dense
+    display_name: "India-style dense district"
+    topology_label: dense_irregular
+    query: "PLACEHOLDER — e.g. a dense district of an Indian city"
+    depot:
+      strategy: centroid
+      node: null
