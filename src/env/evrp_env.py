@@ -3,80 +3,136 @@ Layer 3 — The per-vehicle EVRP environment. A Gym-style MDP.
 
 Scope of ONE episode
 --------------------
-One vehicle, one continuous tour: leave the depot, serve every customer in this
-vehicle's assigned subset, recharge as needed, return to the depot exactly once
-at the end. No early depot returns, no multi-trip (decided in planning) — this
-keeps the horizon bounded and makes "feasible" unambiguous.
+One vehicle, one continuous tour: leave the depot, serve every customer in
+this vehicle's assigned subset, recharge as needed, return to the depot
+exactly once at the end. No early depot returns, no multi-trip.
 
 MDP
 ---
-state   : (position, battery, load, visited_mask)
-          This is deliberately the SMALLEST representation that is still Markov.
-          The ORDER in which customers were visited does not affect what is
-          reachable next, so it is not in the state.
-action  : POI index to travel to next
-          0 = depot, 1..N = customers, N+1..N+M = charging stations
-          (ordering matches cost_matrix.py and the policy head — on purpose)
-reward  : -travel_cost per step, + completion bonus on returning to depot with
-          all customers served. Dense, because a dense signal is far easier to
-          debug against baselines than a single terminal number.
-term    : all customers served AND back at depot
+state   : (position, battery, load, visited_mask) — the smallest
+          representation that is still Markov (visit ORDER doesn't matter).
+action  : POI index to travel to next.
+reward  : -travel_cost per step, + completion bonus on returning to depot
+          with all customers served.
+term    : all customers served AND back at depot.
 
 THE HARD CONSTRAINT
--------------------
-The vehicle must never be able to strand itself. This is enforced by masking in
-feasibility.py, NOT by a penalty the network is supposed to learn its way
-around. `step()` should be incapable of producing a stranded state, and there is
-a test that asserts exactly that.
-
-Cloning
--------
-MCTS forks the state thousands of times per move, so the mutable state is kept
-tiny and copy-cheap (`EVRPState` is a small dataclass of scalars + one bool
-array). Do not add heavy objects to it; keep the road graph and cost matrix in
-the env, shared by reference, never copied.
+--------------------
+step() can never produce a stranded state: every action offered by
+legal_actions() satisfies the reachability-lookahead condition in
+feasibility.py. An illegal action passed by the caller is a bug in the
+caller, and step() raises rather than silently absorbing it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+import numpy as np
+
+from src.env.feasibility import assert_mask_nonempty, legal_action_mask
 
 
 @dataclass
 class EVRPState:
-    """Small, cheaply-copyable MDP state. MCTS clones this constantly."""
+    """Small, cheaply-copyable MDP state. MCTS will clone this constantly."""
 
-    position: int          # POI index
+    position: int
     battery: float
     load: float
-    # visited: np.ndarray  # bool mask over customers
+    visited: np.ndarray  # bool mask over customers, shape (num_customers,)
     step_count: int = 0
 
     def clone(self) -> "EVRPState":
-        raise NotImplementedError
+        """Independent copy — mutating the clone must never affect the original.
+
+        This is load-bearing for MCTS correctness (see
+        tests/test_env.py::test_state_clone_is_independent): a shared numpy
+        view here would silently corrupt the entire search tree.
+        """
+        return EVRPState(
+            position=self.position,
+            battery=self.battery,
+            load=self.load,
+            visited=self.visited.copy(),
+            step_count=self.step_count,
+        )
+
+
+class IllegalActionError(ValueError):
+    """Raised when step() is called with an action outside the legal mask.
+
+    This is a caller bug, not something the environment should paper over —
+    silently clipping to a legal action would hide errors in the agent/search
+    code that produced the illegal action in the first place.
+    """
 
 
 class EVRPEnv:
     """Gym-style single-vehicle EVRP over a real road network."""
 
-    def reset(self, instance) -> EVRPState:
-        """Start a fresh episode from the depot with a full battery."""
-        raise NotImplementedError
+    def __init__(self, instance):
+        self.instance = instance
+
+    def reset(self) -> EVRPState:
+        """Start a fresh episode from the depot with a full battery and load."""
+        return EVRPState(
+            position=self.instance.depot_index,
+            battery=self.instance.battery_capacity,
+            load=self.instance.vehicle_capacity,
+            visited=np.zeros(self.instance.num_customers, dtype=bool),
+            step_count=0,
+        )
+
+    def legal_actions(self, state: EVRPState) -> np.ndarray:
+        """Boolean mask over POI indices. Delegates to feasibility.py."""
+        mask = legal_action_mask(state, self.instance)
+        assert_mask_nonempty(mask, state)
+        return mask
 
     def step(self, state: EVRPState, action: int):
         """Apply `action`, return (next_state, reward, done, info).
 
-        Functional style (state in, state out) rather than mutating `self`, so
-        MCTS can branch freely without defensive copying everywhere.
-
-        MUST assert the action is legal under the current mask. An illegal action
-        is a bug in the caller, not something to silently absorb.
+        Functional style (state in, state out) rather than mutating in place,
+        so MCTS can branch freely without defensive copying at every call site.
         """
-        raise NotImplementedError
+        mask = self.legal_actions(state)
+        if not mask[action]:
+            raise IllegalActionError(
+                f"Action {action} is not legal from state "
+                f"(position={state.position}, battery={state.battery:.1f}, "
+                f"load={state.load:.1f}). Legal actions: {np.flatnonzero(mask).tolist()}"
+            )
 
-    def legal_actions(self, state: EVRPState):
-        """Delegates to feasibility.py. See that module for the real work."""
-        raise NotImplementedError
+        cost = self.instance.cost_matrix.cost(state.position, action)
+        energy_used = self.instance.cost_matrix.energy_cost(state.position, action)
+        reward = -cost
+
+        new_visited = state.visited.copy()
+        new_load = state.load
+        new_battery = state.battery - energy_used
+
+        if action in self.instance.customer_indices():
+            new_visited[action - 1] = True
+            new_load = state.load - self.instance.demand(action)
+        elif action == self.instance.depot_index or action in self.instance.station_indices():
+            # depot and charging stations both fully recharge in v1
+            new_battery = self.instance.battery_capacity
+
+        next_state = EVRPState(
+            position=action,
+            battery=new_battery,
+            load=new_load,
+            visited=new_visited,
+            step_count=state.step_count + 1,
+        )
+
+        done = action == self.instance.depot_index and bool(new_visited.all())
+        if done:
+            reward += 0.0  # completion_bonus is 0.0 by default config; see instance/config
+
+        info = {"cost": cost, "energy_used": energy_used}
+        return next_state, reward, done, info
 
     def is_terminal(self, state: EVRPState) -> bool:
-        raise NotImplementedError
+        return state.position == self.instance.depot_index and bool(state.visited.all())

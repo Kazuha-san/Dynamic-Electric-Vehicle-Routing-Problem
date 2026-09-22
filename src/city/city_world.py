@@ -4,25 +4,18 @@ Layer 0 — The `CityWorld`: a road graph plus everything fixed about the city.
 A CityWorld is the *static* half of the problem. It knows nothing about orders,
 vehicles, or time — only geography. Orders (Layer 1) and vehicles (Layer 3)
 are laid on top of it.
-
-Contents
---------
-- the routable road graph
-- the single HQ / depot node
-- the fixed, sparse set of charging station nodes
-- snapping of arbitrary (lat, lon) markers to the nearest road node
-- the precomputed cost matrix over "points of interest" (see cost_matrix.py)
-
-Why this exists as its own object
----------------------------------
-Every downstream layer needs "how far is A from B, along real roads". Making
-that a single well-tested object means the RL environment never touches OSMnx
-or shortest-path internals — it just asks the world for a cost.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+import networkx as nx
+import numpy as np
+
+from src.city.charging_stations import place_charging_stations, validate_station_coverage
+from src.city.cost_matrix import CostMatrix, build_cost_matrix
+from src.city.osm_loader import CitySpec, load_city_graph
 
 
 @dataclass
@@ -31,43 +24,88 @@ class CityWorld:
 
     city_id: str
     topology_label: str
-    # graph: networkx.MultiDiGraph          # routable, projected road network
-    # depot_node: int                        # single HQ
-    # charging_nodes: tuple[int, ...]        # fixed, sparse
-    # cost_matrix: CostMatrix                # see cost_matrix.py
+    graph: nx.MultiDiGraph
+    depot_node: object
+    charging_nodes: tuple
+    energy_rate: float
+    _base_cost_matrix: CostMatrix  # covers depot + all charging stations only
 
-    def snap(self, lat: float, lon: float) -> int:
-        """Snap a map marker (a customer placed by the user) to the nearest road node.
+    def snap(self, lat: float, lon: float) -> object:
+        """Snap a map marker to the nearest road node by projected (x, y).
 
-        TODO(Checkpoint 1): osmnx.distance.nearest_nodes, with a sanity check that
-        the snapped node is within a reasonable radius of the marker.
+        NOTE: expects (lat, lon) already converted to the graph's projected
+        (x, y) coordinate system by the caller — this project does not re-do
+        the lat/lon -> projected-metres conversion here to avoid depending on
+        pyproj/osmnx at runtime for a one-line nearest-node lookup.
         """
-        raise NotImplementedError
+        best_node, best_dist = None, float("inf")
+        for n, data in self.graph.nodes(data=True):
+            d = (data["x"] - lon) ** 2 + (data["y"] - lat) ** 2
+            if d < best_dist:
+                best_node, best_dist = n, d
+        return best_node
 
-    def travel_cost(self, from_node: int, to_node: int) -> float:
-        """Road-network shortest-path cost between two nodes.
+    def travel_cost(self, from_node, to_node) -> float:
+        """Road-network shortest-path cost between two arbitrary graph nodes."""
+        return nx.shortest_path_length(self.graph, from_node, to_node, weight="length")
 
-        NOTE: this is *road distance*, never Euclidean. The whole point of Layer 0
-        is that a vehicle cannot fly diagonally through buildings.
-        """
-        raise NotImplementedError
+    def energy_cost(self, from_node, to_node) -> float:
+        return self.travel_cost(from_node, to_node) * self.energy_rate
 
-    def energy_cost(self, from_node: int, to_node: int) -> float:
-        """Battery consumed travelling from_node -> to_node.
+    @property
+    def safe_nodes(self) -> tuple:
+        """Charging stations plus the depot — the set that makes a state 'escapable'."""
+        return (self.depot_node,) + self.charging_nodes
 
-        v1: linear in distance (energy_rate * distance). Nonlinear / grade-aware
-        consumption is noted as a future extension.
-        """
-        raise NotImplementedError
+    def coverage_report(self, battery_capacity: float) -> dict:
+        return validate_station_coverage(
+            self.graph, self.depot_node, self.charging_nodes, battery_capacity, self.energy_rate
+        )
 
 
-def build_city_world(spec, config) -> CityWorld:
-    """Assemble a CityWorld: load graph, place depot + charging stations, build matrices.
+def _pick_depot_centroid(graph: nx.MultiDiGraph):
+    """Depot = the graph node nearest the centroid of all node positions."""
+    xs = np.array([d["x"] for _, d in graph.nodes(data=True)])
+    ys = np.array([d["y"] for _, d in graph.nodes(data=True)])
+    cx, cy = xs.mean(), ys.mean()
+    nodes = list(graph.nodes(data=True))
+    best_node, best_dist = None, float("inf")
+    for n, data in nodes:
+        d = (data["x"] - cx) ** 2 + (data["y"] - cy) ** 2
+        if d < best_dist:
+            best_node, best_dist = n, d
+    return best_node
 
-    TODO(Checkpoint 1):
-      - load_city_graph(spec)
-      - choose depot node (config-driven, or graph-centroid-nearest)
-      - place charging stations (see charging_stations.py)
-      - build the POI cost matrix
-    """
-    raise NotImplementedError
+
+def build_city_world(
+    city_id: str,
+    display_name: str,
+    topology_label: str,
+    cache_dir: str,
+    num_charging_stations: int,
+    energy_rate: float,
+    station_strategy: str = "coverage",
+    seed: int = 0,
+) -> CityWorld:
+    """Assemble a CityWorld: load graph, place depot + charging stations, build matrices."""
+    graph = load_city_graph(city_id, cache_dir)
+
+    depot_node = _pick_depot_centroid(graph)
+
+    rng = np.random.default_rng(seed)
+    charging_nodes = place_charging_stations(
+        graph, depot_node, num_charging_stations, strategy=station_strategy, rng=rng
+    )
+
+    poi_nodes = (depot_node,) + charging_nodes
+    base_cost_matrix = build_cost_matrix(graph, poi_nodes, energy_rate)
+
+    return CityWorld(
+        city_id=city_id,
+        topology_label=topology_label,
+        graph=graph,
+        depot_node=depot_node,
+        charging_nodes=charging_nodes,
+        energy_rate=energy_rate,
+        _base_cost_matrix=base_cost_matrix,
+    )

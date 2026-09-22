@@ -121,7 +121,9 @@ def extract_one(spec: dict) -> dict:
     # Rough area from the convex hull of node positions (m^2 -> km^2), since we
     # projected to metres above.
     try:
-        area_km2 = ox.utils_graph.graph_to_gdfs(G, edges=False).unary_union.convex_hull.area / 1e6
+        xs = [d["x"] for _, d in G.nodes(data=True)]
+        ys = [d["y"] for _, d in G.nodes(data=True)]
+        area_km2 = (max(xs) - min(xs)) * (max(ys) - min(ys)) / 1e6
     except Exception:
         area_km2 = float("nan")
 

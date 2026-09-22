@@ -44,14 +44,32 @@ Logged in `ARCHITECTURE.md` §7.
 
 ---
 
-## [pending] Checkpoint 1 — City World & Environment Foundation
+## [done] Checkpoint 1 — City World & Environment Foundation
 
-**To record when done**
-- Which three districts were chosen, and their node/edge counts
-- Charging station placement strategy chosen, and the coverage validation report
-- Cost matrix build time per city (this determines whether the POI-restricted approach
-  scales to the sizes we want)
-- Confirmation that the trap instance is correctly masked
+Full report: `docs/checkpoints/checkpoint1.md`.
+
+**Cities finalized**: Downtown Chicago/Loop (grid, 1138 nodes), Central York (organic,
+1943 nodes), Old Delhi/Chandni Chowk (dense/irregular, 1301 nodes) — all extracted at a
+standardized 2000m radius, 14-16 km2 each.
+
+**Charging stations**: 6 per city, farthest-point-dispersion placement. Minimum viable
+battery for ~100% servability: 6000 (us_grid, uk_organic), 8000 (in_dense). Config
+default (15000) has margin.
+
+**Real bug found and fixed**: the escape-feasibility check originally treated the depot
+as an unconditionally safe mid-route target. It isn't — v1 forbids early depot return,
+so a vehicle could be told "you can escape" toward a node the mask wouldn't actually let
+it enter. Fixed by restricting the general escape check to charging stations only,
+with the depot valid as an escape target solely for the move that completes the tour.
+Full narrative in checkpoint1.md.
+
+**Validation**: 34 unit/property tests passing (test_city.py, test_feasibility.py,
+test_env.py). 300-trial stress test post-fix: 0 negative-battery events, 0 empty-mask
+events, at validated battery levels.
+
+**Open item carried to later**: station-to-depot eventual-reachability is not yet an
+independent offline precondition check (implicitly protected at runtime, but not
+verified in advance) — small follow-up, not a correctness gap.
 
 ---
 

@@ -1,42 +1,63 @@
 # ==========================================================================
 # City definitions — Layer 0
 #
-# Cities are INSPIRED BY real places, not 1:1 recreations. Real districts are
-# pulled purely to obtain genuine topological variety; the point of the
-# cross-city experiment is to test whether a policy trained on one street
-# topology generalizes to a structurally different one.
+# Cities are INSPIRED BY real places, not 1:1 recreations. Real districts were
+# pulled purely to obtain genuine topological variety. Only road GEOMETRY
+# (which nodes connect to which, edge length, one-way direction) survives
+# extraction — no street names, POI tags, or addresses are kept anywhere in
+# the pipeline (verified by tests/test_city.py::test_no_real_world_tags_survived_extraction).
 #
-# `query` values below are PLACEHOLDERS — pick the actual districts in
-# Checkpoint 1 by eyeballing candidates and checking node counts, then record
-# the final choices here (and in the research log).
+# Finalized in Checkpoint 1. See docs/checkpoints/checkpoint1.md for the full
+# extraction record, including the two rejected candidates (Salt Lake City/
+# Manchester swapped for name-recognition reasons; Jaipur swapped for Old
+# Delhi after a failed extraction; York's first extraction pulled the whole
+# city and had to be redone at the standardized radius below).
 # ==========================================================================
 
 defaults:
   network_type: drive
-  simplify: true
-  target_node_count: [1500, 4000]   # big enough to be non-trivial, small enough to precompute
+  radius_m: 2000   # standardized across all three cities for a fair area comparison
 
 cities:
   - city_id: us_grid
-    display_name: "US-style grid district"
+    display_name: "Downtown Chicago (Loop)"
     topology_label: grid
-    query: "PLACEHOLDER — e.g. a gridded district of a US city"
-    depot:
-      strategy: centroid          # centroid | manual
-      node: null
+    center: [41.8786, -87.6298]
+    radius_m: 2000
+    extracted:
+      num_nodes: 1138
+      num_edges: 2615
+      bbox_area_km2: 14.38
+      strongly_connected: true
 
   - city_id: uk_organic
-    display_name: "UK-style organic district"
+    display_name: "Central York"
     topology_label: organic
-    query: "PLACEHOLDER — e.g. an irregular/older district of a UK city"
-    depot:
-      strategy: centroid
-      node: null
+    center: [53.9600, -1.0873]
+    radius_m: 2000
+    extracted:
+      num_nodes: 1943
+      num_edges: 4188
+      bbox_area_km2: 16.32
+      strongly_connected: true
 
   - city_id: in_dense
-    display_name: "India-style dense district"
+    display_name: "Old Delhi (Chandni Chowk)"
     topology_label: dense_irregular
-    query: "PLACEHOLDER — e.g. a dense district of an Indian city"
-    depot:
-      strategy: centroid
-      node: null
+    center: [28.6562, 77.2410]
+    radius_m: 2000
+    extracted:
+      num_nodes: 1301
+      num_edges: 3139
+      bbox_area_km2: 15.75
+      strongly_connected: true
+
+# Charging station placement, validated in Checkpoint 1:
+# with 6 stations (coverage/farthest-point-dispersion strategy) and battery
+# capacity >= 6000 energy units (energy_rate=1.0, i.e. >= 6000m range), all
+# three cities reach ~100% node servability. See checkpoint1.md for the
+# per-city minimum-viable-battery table.
+charging_stations:
+  count: 6
+  strategy: coverage
+  min_viable_battery_capacity: 6000   # empirically established; config default (15000) has margin

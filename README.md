@@ -133,8 +133,11 @@ python scripts/evaluate.py --config configs/default.yaml \
 
 ## Status
 
-Scaffold stage. Every module is a documented stub carrying its design rationale
-and a `TODO(Checkpoint N)` marker. Tests are written as skipped specifications —
-they describe what each layer must satisfy before it counts as done.
+**Checkpoint 1 complete** — see [`docs/checkpoints/checkpoint1.md`](./docs/checkpoints/checkpoint1.md).
+Real road-network cities extracted and validated (Chicago/York/Old Delhi), the EVRP
+environment and hard feasibility-masking safety layer implemented and tested (34
+passing tests, 300-trial stress test, zero safety violations). A real design bug in
+the escape-feasibility check was found and fixed during this checkpoint — full
+account in the report.
 
-Current checkpoint: **1 — City World & Environment Foundation**.
+Next: **Checkpoint 2 — Fleet Sizing & Baselines**.
